@@ -14,7 +14,7 @@ A minimal implementation of a GPT-like language model using PyTorch. This projec
 
 ## 🎯 Overview
 
-This project implements a tiny GPT (Generative Pre-trained Transformer) model from scratch. The model learns to predict the next word in a sequence by training on a small corpus of text. After training, it can generate new text that follows similar patterns to what it learned.
+This project implements a very small GPT (Generative Pre-trained Transformer) model from scratch. The model learns to predict the next word in a sequence by training on a small corpus of text. After training, it can generate new text that follows similar patterns to what it learned.
 
 **What this project teaches:**
 - How transformer architecture works
@@ -245,13 +245,13 @@ A minimal GPT-like model that:
 
 #### **Key Functions**
 
-**`get_batch(batch_size=16)`**
+**`sample_training_batch(batch_size=16)`**
 - Randomly selects chunks of text from the training data
-- Creates input sequences (x) and target sequences (y)
+- Creates input sequences and target sequences
 - Target sequences are shifted by one position (next word prediction)
 - Returns batches ready for training
 
-**`forward(idx, targets=None)`**
+**`forward(token_indices, targets=None)`**
 - Main processing function that runs when you call the model
 - Converts word indices to embeddings
 - Adds position information
@@ -259,12 +259,12 @@ A minimal GPT-like model that:
 - Converts to word predictions (logits)
 - Calculates loss if targets are provided
 
-**`generate(idx, max_new_tokens)`**
+**`generate(starting_tokens, max_new_tokens)`**
 - Text generation function
 - Starts with a seed word or phrase
-- Predicts next word using softmax probabilities
+- Predicts next token using softmax probabilities
 - Samples from the probability distribution
-- Appends new word and repeats until desired length
+- Appends new token and repeats until desired length
 
 ## 📊 Model Configuration
 
@@ -305,10 +305,10 @@ epochs = 1500      # Training steps: 1500
 
 ```python
 # 1. Get training batch
-xb, yb = get_batch()  # xb = input, yb = target (next words)
+input_batch, target_batch = sample_training_batch()  # input = sequences, target = next words
 
 # 2. Forward pass
-logits, loss = model(xb, yb)  # Model makes predictions
+logits, loss = model(input_batch, target_batch)  # Model makes predictions
 
 # 3. Backward pass
 loss.backward()  # Calculate gradients
