@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
 
 from transformer_components import Block
 
@@ -48,6 +47,7 @@ idx2word = {i: w for w, i in word2idx.items()}  # number -> word
 # print("idx2word : ", idx2word) 
 
 # Convert the entire text into a sequence of numbers
+# made one Dimentions tensors because each token is a single number
 data = torch.tensor([word2idx[w] for w in text.split()], dtype=torch.long)
 print("data : ", data) 
 # print(len(data))
