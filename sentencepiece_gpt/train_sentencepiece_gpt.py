@@ -233,3 +233,4 @@ print("\nGenerated text:\n")
 generated_ids = out[0].tolist()
 # Decode token IDs back to readable text and print
 print(sp.decode(generated_ids))
+

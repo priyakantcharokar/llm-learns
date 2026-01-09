@@ -282,3 +282,4 @@ generated_sequence = model.generate(starting_context, max_new_tokens=15)
 
 print("\nGenerated text:\n")
 print(" ".join(idx2word[int(i)] for i in generated_sequence[0]))
+
