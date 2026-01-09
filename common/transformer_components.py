@@ -1,7 +1,11 @@
+# File containing transformer architecture components
 # transformer_components.py
 
+# PyTorch library for tensor operations
 import torch
+# Neural network modules and layers
 import torch.nn as nn
+# Functional interface for neural network operations
 import torch.nn.functional as F
 
 # ----------------------------
@@ -23,10 +27,15 @@ class SelfAttentionHead(nn.Module):
             block_size: The maximum number of words we can look at
             head_size: The size of this attention head
         """
+        # Initialize parent nn.Module class
         super().__init__()
+        # Linear layer to compute key vectors
         self.key = nn.Linear(embedding_dim, head_size, bias=False)
+        # Linear layer to compute query vectors
         self.query = nn.Linear(embedding_dim, head_size, bias=False)
+        # Linear layer to compute value vectors
         self.value = nn.Linear(embedding_dim, head_size, bias=False)
+        # Lower triangular mask for causal attention
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
 
     def compute_keys_queries_values(self, x):
@@ -41,9 +50,13 @@ class SelfAttentionHead(nn.Module):
             queries: Query representations
             values: Value representations
         """
+        # Transform input to key representations
         keys = self.key(x)
+        # Transform input to query representations
         queries = self.query(x)
+        # Transform input to value representations
         values = self.value(x)
+        # Return all three representations
         return keys, queries, values
     
     def compute_attention_scores(self, queries, keys, sequence_length):
@@ -58,9 +71,12 @@ class SelfAttentionHead(nn.Module):
         Returns:
             Attention scores (before masking and softmax)
         """
+        # Get embedding dimension from query tensor
         embedding_dim = queries.shape[-1]
         # Compute dot product attention scores, scaled by sqrt of embedding dimension
+        # Scaled dot-product attention
         attention_scores = queries @ keys.transpose(-2, -1) / (embedding_dim ** 0.5)
+        # Return raw attention scores
         return attention_scores
     
     def apply_causal_mask(self, attention_scores, sequence_length):
@@ -75,9 +91,12 @@ class SelfAttentionHead(nn.Module):
             Masked attention scores (future positions set to -inf)
         """
         # Create mask: only allow attention to previous tokens
+        # Extract lower triangular mask for current sequence
         causal_mask = self.tril[:sequence_length, :sequence_length]
         # Set future positions to negative infinity (will become 0 after softmax)
+        # Mask out future tokens
         masked_scores = attention_scores.masked_fill(causal_mask == 0, float('-inf'))
+        # Return masked attention scores
         return masked_scores
     
     def apply_attention_weights(self, attention_weights, values):
@@ -91,7 +110,9 @@ class SelfAttentionHead(nn.Module):
         Returns:
             Weighted sum of values based on attention weights
         """
+        # Weighted sum of values using attention weights
         output = attention_weights @ values
+        # Return final attention output
         return output
     
     def forward(self, x):
@@ -110,17 +131,24 @@ class SelfAttentionHead(nn.Module):
         Returns:
             Output tensor with the same shape as input, but with attention applied
         """
+        # Extract dimensions from input tensor
         batch_size, sequence_length, embedding_dim = x.shape
         # Compute keys, queries, and values
+        # Transform input to K, Q, V
         keys, queries, values = self.compute_keys_queries_values(x)
         # Calculate attention scores
+        # Compute attention scores
         attention_scores = self.compute_attention_scores(queries, keys, sequence_length)
         # Apply causal masking (prevent seeing future tokens)
+        # Mask future positions
         masked_scores = self.apply_causal_mask(attention_scores, sequence_length)
         # Convert scores to probabilities using softmax
+        # Normalize to probability distribution
         attention_weights = F.softmax(masked_scores, dim=-1)
         # Apply attention weights to values
+        # Weighted combination of values
         output = self.apply_attention_weights(attention_weights, values)
+        # Return attention output
         return output
 
 # ----------------------------
@@ -143,9 +171,13 @@ class MultiHeadAttention(nn.Module):
             block_size: The maximum number of words we can look at
             num_heads: How many attention heads to use
         """
+        # Initialize parent nn.Module class
         super().__init__()
+        # Calculate size of each attention head
         head_size = embedding_dim // num_heads
+        # Create multiple attention heads
         self.heads = nn.ModuleList([SelfAttentionHead(embedding_dim, block_size, head_size) for _ in range(num_heads)])
+        # Projection layer to combine head outputs
         self.proj = nn.Linear(num_heads * head_size, embedding_dim)
 
     def apply_all_attention_heads(self, x):
@@ -158,7 +190,9 @@ class MultiHeadAttention(nn.Module):
         Returns:
             List of outputs from each attention head
         """
+        # Apply each attention head to input in parallel
         head_outputs = [head(x) for head in self.heads]
+        # Return list of outputs from all heads
         return head_outputs
     
     def combine_head_outputs(self, head_outputs):
@@ -171,7 +205,9 @@ class MultiHeadAttention(nn.Module):
         Returns:
             Concatenated tensor with all head outputs combined
         """
+        # Concatenate all head outputs along embedding dimension
         combined = torch.cat(head_outputs, dim=-1)
+        # Return concatenated tensor
         return combined
     
     def forward(self, x):
@@ -190,11 +226,15 @@ class MultiHeadAttention(nn.Module):
             Output tensor with the same shape as input, combining all attention heads
         """
         # Apply all attention heads in parallel
+        # Get outputs from all attention heads
         head_outputs = self.apply_all_attention_heads(x)
         # Concatenate all head outputs
+        # Concatenate head outputs
         combined_outputs = self.combine_head_outputs(head_outputs)
         # Project back to original embedding dimension
+        # Project to original embedding size
         final_output = self.proj(combined_outputs)
+        # Return final multi-head attention output
         return final_output
 
 # ----------------------------
@@ -214,10 +254,15 @@ class FeedForward(nn.Module):
         Args:
             n_embd: The size of each word's representation (same as embedding_dim)
         """
+        # Initialize parent nn.Module class
         super().__init__()
+        # Create sequential network
         self.net = nn.Sequential(
+            # Expand embedding dimension by 4x
             nn.Linear(n_embd, 4 * n_embd),
+            # Apply ReLU activation (non-linearity)
             nn.ReLU(),
+            # Contract back to original embedding dimension
             nn.Linear(4 * n_embd, n_embd)
         )
     def forward(self, x):
@@ -235,6 +280,7 @@ class FeedForward(nn.Module):
         Returns:
             Output tensor with the same shape as input, after processing
         """
+        # Process input through feedforward network
         return self.net(x)
 
 # ----------------------------
@@ -259,10 +305,15 @@ class Block(nn.Module):
             block_size: The maximum number of words we can look at
             n_heads: How many attention heads to use
         """
+        # Initialize parent nn.Module class
         super().__init__()
+        # Multi-head self-attention layer
         self.sa = MultiHeadAttention(embedding_dim, block_size, n_heads)
+        # Feedforward neural network layer
         self.ffwd = FeedForward(embedding_dim)
+        # Layer normalization before attention
         self.ln1 = nn.LayerNorm(embedding_dim)
+        # Layer normalization before feedforward
         self.ln2 = nn.LayerNorm(embedding_dim)
 
     def apply_attention_with_skip_connection(self, x):
@@ -276,9 +327,13 @@ class Block(nn.Module):
             Output after attention with residual connection
         """
         # Normalize input, apply attention, add residual connection
+        # Normalize input before attention
         normalized_input = self.ln1(x)
+        # Apply multi-head attention
         attention_output = self.sa(normalized_input)
+        # Add residual connection (skip connection)
         output_with_residual = x + attention_output
+        # Return output with residual
         return output_with_residual
     
     def apply_feedforward_with_skip_connection(self, x):
@@ -292,9 +347,13 @@ class Block(nn.Module):
             Output after feedforward with residual connection
         """
         # Normalize input, apply feedforward, add residual connection
+        # Normalize input before feedforward
         normalized_input = self.ln2(x)
+        # Apply feedforward network
         feedforward_output = self.ffwd(normalized_input)
+        # Add residual connection (skip connection)
         output_with_residual = x + feedforward_output
+        # Return output with residual
         return output_with_residual
     
     def forward(self, x):
@@ -315,7 +374,11 @@ class Block(nn.Module):
             Output tensor with the same shape as input, after processing through the block
         """
         # Apply attention with skip connection
+        # Process through attention + residual
         x = self.apply_attention_with_skip_connection(x)
         # Apply feedforward with skip connection
+        # Process through feedforward + residual
         x = self.apply_feedforward_with_skip_connection(x)
+        # Return final transformer block output
         return x
+

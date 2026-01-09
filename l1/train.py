@@ -1,8 +1,13 @@
+import sys
+import os
+# Add parent directory to path to access common folder
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from transformer_components import Block
+from common.transformer_components import Block
 
 
 # Check PyTorch version and GPU availability

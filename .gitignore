@@ -54,3 +54,7 @@ ENV/
 
 # UV lock file (optional - some teams prefer to commit it)
 # uv.lock
+
+*.model
+*.vocab
+
