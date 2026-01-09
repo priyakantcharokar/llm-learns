@@ -28,10 +28,10 @@ This project implements a very small GPT (Generative Pre-trained Transformer) mo
 ```
 llm-learns/
 ├── code/
-│   ├── transformer_blocks.py  # Core transformer components
-│   └── demo.py                # Training and generation script
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+│   ├── transformer_components.py  # Core transformer components
+│   └── train.py                   # Training and generation script
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
 ```
 
 ## 🔑 Important Terms
@@ -179,7 +179,7 @@ Navigate to the code directory and run:
 
 ```bash
 cd code
-python demo.py
+python train.py
 ```
 
 ### What Happens
@@ -209,7 +209,7 @@ oh carol i am but a fool darling i love you so...
 
 ## 🧩 Components Explained
 
-### `transformer_blocks.py`
+### `transformer_components.py`
 
 Contains the core building blocks of the transformer:
 
@@ -233,7 +233,7 @@ Contains the core building blocks of the transformer:
 - Combines attention and feed-forward
 - Uses layer normalization and skip connections
 
-### `demo.py`
+### `train.py`
 
 The main training and generation script:
 
@@ -268,7 +268,7 @@ A minimal GPT-like model that:
 
 ## 📊 Model Configuration
 
-The current model settings (in `demo.py`):
+The current model settings (in `train.py`):
 
 ```python
 block_size = 6      # Context window: 6 words

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from transformer_blocks import Block
+from transformer_components import Block
 
 
 # Check PyTorch version and GPU availability

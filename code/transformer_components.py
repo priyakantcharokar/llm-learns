@@ -1,4 +1,4 @@
-# transformer_blocks.py
+# transformer_components.py
 
 import torch
 import torch.nn as nn
