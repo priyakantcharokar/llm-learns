@@ -29,9 +29,74 @@ class SelfAttentionHead(nn.Module):
         self.value = nn.Linear(embedding_dim, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
 
+    def compute_keys_queries_values(self, x):
+        """
+        Transform input into keys, queries, and values for attention computation.
+        
+        Args:
+            x: Input tensor with shape (batch, sequence_length, embedding_dim)
+            
+        Returns:
+            keys: Key representations
+            queries: Query representations
+            values: Value representations
+        """
+        keys = self.key(x)
+        queries = self.query(x)
+        values = self.value(x)
+        return keys, queries, values
+    
+    def compute_attention_scores(self, queries, keys, sequence_length):
+        """
+        Calculate attention scores between queries and keys.
+        
+        Args:
+            queries: Query tensor
+            keys: Key tensor
+            sequence_length: Length of the current sequence
+            
+        Returns:
+            Attention scores (before masking and softmax)
+        """
+        embedding_dim = queries.shape[-1]
+        # Compute dot product attention scores, scaled by sqrt of embedding dimension
+        attention_scores = queries @ keys.transpose(-2, -1) / (embedding_dim ** 0.5)
+        return attention_scores
+    
+    def apply_causal_mask(self, attention_scores, sequence_length):
+        """
+        Apply causal masking to prevent attending to future tokens.
+        
+        Args:
+            attention_scores: Raw attention scores
+            sequence_length: Length of the current sequence
+            
+        Returns:
+            Masked attention scores (future positions set to -inf)
+        """
+        # Create mask: only allow attention to previous tokens
+        causal_mask = self.tril[:sequence_length, :sequence_length]
+        # Set future positions to negative infinity (will become 0 after softmax)
+        masked_scores = attention_scores.masked_fill(causal_mask == 0, float('-inf'))
+        return masked_scores
+    
+    def apply_attention_weights(self, attention_weights, values):
+        """
+        Apply attention weights to values to get the final output.
+        
+        Args:
+            attention_weights: Softmax-normalized attention weights
+            values: Value representations
+            
+        Returns:
+            Weighted sum of values based on attention weights
+        """
+        output = attention_weights @ values
+        return output
+    
     def forward(self, x):
         """
-        Process the input and compute attention.
+        Process the input and compute self-attention.
         
         This function:
         1. Creates keys, queries, and values from the input
@@ -45,15 +110,18 @@ class SelfAttentionHead(nn.Module):
         Returns:
             Output tensor with the same shape as input, but with attention applied
         """
-        B, T, C = x.shape
-        k = self.key(x)
-        q = self.query(x)
-        wei = q @ k.transpose(-2, -1) / (C ** 0.5)
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
-        wei = F.softmax(wei, dim=-1)
-        v = self.value(x)
-        out = wei @ v
-        return out
+        batch_size, sequence_length, embedding_dim = x.shape
+        # Compute keys, queries, and values
+        keys, queries, values = self.compute_keys_queries_values(x)
+        # Calculate attention scores
+        attention_scores = self.compute_attention_scores(queries, keys, sequence_length)
+        # Apply causal masking (prevent seeing future tokens)
+        masked_scores = self.apply_causal_mask(attention_scores, sequence_length)
+        # Convert scores to probabilities using softmax
+        attention_weights = F.softmax(masked_scores, dim=-1)
+        # Apply attention weights to values
+        output = self.apply_attention_weights(attention_weights, values)
+        return output
 
 # ----------------------------
 # Multi-Head Attention
@@ -80,6 +148,32 @@ class MultiHeadAttention(nn.Module):
         self.heads = nn.ModuleList([SelfAttentionHead(embedding_dim, block_size, head_size) for _ in range(num_heads)])
         self.proj = nn.Linear(num_heads * head_size, embedding_dim)
 
+    def apply_all_attention_heads(self, x):
+        """
+        Apply all attention heads in parallel to the input.
+        
+        Args:
+            x: Input tensor with shape (batch, sequence_length, embedding_dim)
+            
+        Returns:
+            List of outputs from each attention head
+        """
+        head_outputs = [head(x) for head in self.heads]
+        return head_outputs
+    
+    def combine_head_outputs(self, head_outputs):
+        """
+        Concatenate outputs from all attention heads.
+        
+        Args:
+            head_outputs: List of tensors from each attention head
+            
+        Returns:
+            Concatenated tensor with all head outputs combined
+        """
+        combined = torch.cat(head_outputs, dim=-1)
+        return combined
+    
     def forward(self, x):
         """
         Process input through all attention heads and combine the results.
@@ -95,8 +189,13 @@ class MultiHeadAttention(nn.Module):
         Returns:
             Output tensor with the same shape as input, combining all attention heads
         """
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        return self.proj(out)
+        # Apply all attention heads in parallel
+        head_outputs = self.apply_all_attention_heads(x)
+        # Concatenate all head outputs
+        combined_outputs = self.combine_head_outputs(head_outputs)
+        # Project back to original embedding dimension
+        final_output = self.proj(combined_outputs)
+        return final_output
 
 # ----------------------------
 # Feed Forward Network
@@ -166,6 +265,38 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(embedding_dim)
         self.ln2 = nn.LayerNorm(embedding_dim)
 
+    def apply_attention_with_skip_connection(self, x):
+        """
+        Apply multi-head attention with layer normalization and skip connection.
+        
+        Args:
+            x: Input tensor with shape (batch, sequence_length, embedding_dim)
+            
+        Returns:
+            Output after attention with residual connection
+        """
+        # Normalize input, apply attention, add residual connection
+        normalized_input = self.ln1(x)
+        attention_output = self.sa(normalized_input)
+        output_with_residual = x + attention_output
+        return output_with_residual
+    
+    def apply_feedforward_with_skip_connection(self, x):
+        """
+        Apply feedforward network with layer normalization and skip connection.
+        
+        Args:
+            x: Input tensor with shape (batch, sequence_length, embedding_dim)
+            
+        Returns:
+            Output after feedforward with residual connection
+        """
+        # Normalize input, apply feedforward, add residual connection
+        normalized_input = self.ln2(x)
+        feedforward_output = self.ffwd(normalized_input)
+        output_with_residual = x + feedforward_output
+        return output_with_residual
+    
     def forward(self, x):
         """
         Process the input through the transformer block.
@@ -183,6 +314,8 @@ class Block(nn.Module):
         Returns:
             Output tensor with the same shape as input, after processing through the block
         """
-        x = x + self.sa(self.ln1(x))
-        x = x + self.ffwd(self.ln2(x))
+        # Apply attention with skip connection
+        x = self.apply_attention_with_skip_connection(x)
+        # Apply feedforward with skip connection
+        x = self.apply_feedforward_with_skip_connection(x)
         return x

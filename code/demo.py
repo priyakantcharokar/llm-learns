@@ -30,40 +30,40 @@ corpus = [
 # Add end-of-sentence markers and combine all sentences into one text
 corpus = [s + " <END>" for s in corpus]
 text = " ".join(corpus)
-print(text)
+# print(text)
 
 # Create vocabulary: get all unique words from the text
 words = list(set(text.split()))
-print(words)
+# print(words)
 
 # Vocabulary size: how many unique words we have
 vocab_size = len(words)
-print(vocab_size)
+# print(vocab_size)
 
 # Create mappings: convert words to numbers and numbers back to words
 word2idx = {w: i for i, w in enumerate(words)}  # word -> number
-print("word2idx : ", word2idx)
+# print("word2idx : ", word2idx)
 
 idx2word = {i: w for w, i in word2idx.items()}  # number -> word
-print("idx2word : ", idx2word) 
+# print("idx2word : ", idx2word) 
 
 # Convert the entire text into a sequence of numbers
 data = torch.tensor([word2idx[w] for w in text.split()], dtype=torch.long)
 print("data : ", data) 
-print(len(data))
+# print(len(data))
 
 # Model configuration: these control the size and behavior of the model
 block_size = 6      # Maximum number of words the model can look at
 embedding_dim = 32  # Size of each word's representation
-n_heads = 2         # Number of attention heads
+n_heads = 2         # Number of self attention heads
 n_layers = 2        # Number of transformer blocks
 lr = 1e-3           # Learning rate (how fast the model learns)
 epochs = 1500       # How many times to train on the data
 
 
-def get_batch(batch_size=16):
+def sample_training_batch(batch_size=16):
     """
-    Get a random batch of training examples.
+    Sample a random batch of training examples from the data.
     
     This function picks random chunks of text from our data and creates
     input-output pairs. The input is a sequence of words, and the output
@@ -78,17 +78,17 @@ def get_batch(batch_size=16):
         y: Target sequences of shape (batch_size, block_size) - same as x but shifted by 1
     """
     # Pick random starting positions in the data
-    ix = torch.randint(len(data) - block_size, (batch_size,))  
+    random_indices = torch.randint(len(data) - block_size, (batch_size,))  
     # Create input sequences (chunks of block_size words)
-    x = torch.stack([data[i:i+block_size] for i in ix])  
+    input_sequences = torch.stack([data[i:i+block_size] for i in random_indices])  
     # Create target sequences (same chunks but shifted by 1 word forward)
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix]) 
-    return x, y
+    target_sequences = torch.stack([data[i+1:i+block_size+1] for i in random_indices]) 
+    return input_sequences, target_sequences
 
 
 
 
-class TinyGPT(nn.Module):
+class VerySmallGPT(nn.Module):
     """
     A small GPT-like language model.
     
@@ -110,15 +110,53 @@ class TinyGPT(nn.Module):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, embedding_dim) 
 
-        self.position_embedding = nn.Embedding(block_size, embedding_dim) 
+        self.position_embedding = nn.Embedding(block_size, embedding_dim) # order of the words matter
         self.blocks = nn.Sequential(*[Block(embedding_dim, block_size, n_heads) for _ in range(n_layers)]) 
 
         self.ln_f = nn.LayerNorm(embedding_dim)
         self.head = nn.Linear(embedding_dim, vocab_size) 
 
-    def forward(self, idx, targets=None):
+    def embed_tokens_and_positions(self, token_indices):
         """
-        Process input and make predictions.
+        Convert token indices to embeddings and add position information.
+        
+        Args:
+            token_indices: Input tensor with shape (batch, sequence_length) containing word numbers
+            
+        Returns:
+            Combined embeddings with shape (batch, sequence_length, embedding_dim)
+        """
+        batch_size, sequence_length = token_indices.shape
+        # Convert word numbers to vectors
+        token_embeddings = self.token_embedding(token_indices) 
+        # Add position information (where each word is in the sequence)
+        position_embeddings = self.position_embedding(torch.arange(sequence_length, device=token_indices.device))
+        # Combine token and position embeddings
+        combined_embeddings = token_embeddings + position_embeddings
+        return combined_embeddings
+    
+    def compute_loss(self, logits, targets):
+        """
+        Calculate the cross-entropy loss between predictions and targets.
+        
+        Args:
+            logits: Model predictions with shape (batch, sequence_length, vocab_size)
+            targets: Target token indices with shape (batch, sequence_length)
+            
+        Returns:
+            Loss value (scalar tensor)
+        """
+        batch_size, sequence_length, vocab_size = logits.shape
+        # Reshape for cross-entropy: flatten batch and sequence dimensions
+        logits_flat = logits.view(batch_size * sequence_length, vocab_size)
+        targets_flat = targets.view(batch_size * sequence_length)
+        # Calculate cross-entropy loss
+        loss = F.cross_entropy(logits_flat, targets_flat)
+        return loss
+    
+    def forward(self, token_indices, targets=None):
+        """
+        Process input tokens and make predictions about next words.
         
         This function:
         1. Converts word numbers to embeddings (vectors)
@@ -128,75 +166,99 @@ class TinyGPT(nn.Module):
         5. Calculates loss if targets are provided
         
         Args:
-            idx: Input tensor with shape (batch, sequence_length) containing word numbers
+            token_indices: Input tensor with shape (batch, sequence_length) containing word numbers
             targets: Optional target tensor with shape (batch, sequence_length) for training
             
         Returns:
             logits: Predictions for each position, shape (batch, sequence_length, vocab_size)
             loss: The training loss (None if targets not provided)
         """
-        B, T = idx.shape 
-        # Convert word numbers to vectors
-        tok_emb = self.token_embedding(idx) 
-        
-        # Add position information (where each word is in the sequence)
-        pos_emb = self.position_embedding(torch.arange(T, device=idx.device))
-        x = tok_emb + pos_emb  
+        # Embed tokens and add position information
+        x = self.embed_tokens_and_positions(token_indices)
         # Process through transformer blocks
         x = self.blocks(x) 
         # Final normalization
         x = self.ln_f(x)
-        # Convert to word predictions
+        # Convert to word predictions (logits)
         logits = self.head(x) 
-        loss = None
+        
         # Calculate loss if we have targets (during training)
+        loss = None
         if targets is not None:
-            B, T, C = logits.shape 
-            loss = F.cross_entropy(logits.view(B*T, C), targets.view(B*T)) 
+            loss = self.compute_loss(logits, targets)
         return logits, loss
 
-    def generate(self, idx, max_new_tokens):
+    def predict_next_token(self, token_sequence):
         """
-        Generate new text one word at a time.
-        
-        This function starts with some input words and keeps adding new words
-        by predicting what should come next. It repeats this process until
-        it has generated the requested number of new words.
+        Predict the next token given a sequence of tokens.
         
         Args:
-            idx: Starting sequence with shape (batch, sequence_length)
-            max_new_tokens: How many new words to generate
+            token_sequence: Input sequence with shape (batch, sequence_length)
             
         Returns:
-            idx: The complete sequence including the original input and all generated words
+            logits: Predictions for the next token, shape (batch, vocab_size)
         """
+        # Get predictions for what comes next
+        logits, _ = self(token_sequence)
+        # Look at the last position only (we want to predict the next word)
+        next_token_logits = logits[:, -1, :]
+        return next_token_logits
+    
+    def sample_next_token(self, logits):
+        """
+        Sample the next token from the probability distribution.
+        
+        Args:
+            logits: Raw predictions with shape (batch, vocab_size)
+            
+        Returns:
+            Sampled token indices with shape (batch, 1)
+        """
+        # Convert logits to probabilities using softmax
+        probabilities = F.softmax(logits, dim=-1)
+        # Randomly sample a token based on the probabilities
+        sampled_token = torch.multinomial(probabilities, 1)
+        return sampled_token
+    
+    def generate(self, starting_tokens, max_new_tokens):
+        """
+        Generate new text one token at a time.
+        
+        This function starts with some input tokens and keeps adding new tokens
+        by predicting what should come next. It repeats this process until
+        it has generated the requested number of new tokens.
+        
+        Args:
+            starting_tokens: Starting sequence with shape (batch, sequence_length)
+            max_new_tokens: How many new tokens to generate
+            
+        Returns:
+            Complete sequence including the original input and all generated tokens
+        """
+        generated_sequence = starting_tokens
         for _ in range(max_new_tokens):
-            # Only use the last block_size words (model can't see more than that)
-            idx_cond = idx[:, -block_size:]
-            # Get predictions for what comes next
-            logits, _ = self(idx_cond)
-            # Look at the last position only (we want to predict the next word)
-            logits = logits[:, -1, :]
-            # Convert predictions to probabilities
-            probs = F.softmax(logits, dim=-1)
-            # Randomly sample a word based on the probabilities
-            next_idx = torch.multinomial(probs, 1)
-            # Add the new word to the sequence
-            idx = torch.cat((idx, next_idx), dim=1)
-        return idx
+            # Only use the last block_size tokens (model can't see more than that)
+            context_tokens = generated_sequence[:, -block_size:]
+            # Predict next token
+            next_token_logits = self.predict_next_token(context_tokens)
+            # Sample next token from the probability distribution
+            next_token = self.sample_next_token(next_token_logits)
+            # Add the new token to the sequence
+            generated_sequence = torch.cat((generated_sequence, next_token), dim=1)
+        return generated_sequence
 
 
 
 # Create the model and optimizer
-model = TinyGPT()
+model = VerySmallGPT()
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
 # Training loop: teach the model to predict next words
 for step in range(epochs):
     # Get a batch of training examples
-    xb, yb = get_batch() 
+    input_batch, target_batch = sample_training_batch() 
     # Make predictions and calculate loss
-    logits, loss = model(xb, yb)
+    logits, loss = model(input_batch, target_batch)
     # Reset gradients from previous step
     optimizer.zero_grad()
     # Calculate gradients (how to update the model)
@@ -209,8 +271,9 @@ for step in range(epochs):
 
 
 # Generate new text: start with "oh" and see what the model creates
-context = torch.tensor([[word2idx["oh"]]], dtype=torch.long)
-out = model.generate(context, max_new_tokens=15)
+starting_context = torch.tensor([[word2idx["oh"]]], dtype=torch.long)
+# max_new_tokens is the number of new words to generate
+generated_sequence = model.generate(starting_context, max_new_tokens=15)
 
 print("\nGenerated text:\n")
-print(" ".join(idx2word[int(i)] for i in out[0]))
+print(" ".join(idx2word[int(i)] for i in generated_sequence[0]))
